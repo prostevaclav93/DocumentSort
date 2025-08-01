@@ -1,4 +1,4 @@
-import streamline as st
+import streamlit as st
 import tempfile
 import re
 from PyPDF2 import PdfReader, PdfWriter
