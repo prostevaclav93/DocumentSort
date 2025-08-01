@@ -1,70 +1,114 @@
-# Klíčová slova pro začátek nového dokumentu
-KEYWORDS = [
-    "Pracovní smlouva",
-    "Dodatek č.",
-    "Mzdový výměr",
-    "Dohoda o provedení práce",
-    "Dohoda o pracovní činnosti"
-]
-
-import fitz  # PyMuPDF
-import os
+import streamlit as st
+import tempfile
 import re
+from PyPDF2 import PdfReader, PdfWriter
+from pdf2image import convert_from_path
+import pytesseract
 
-# --- Nastavení ---
-input_pdf_path = "velky_soubor.pdf"
-output_folder = "vystupy"
-KEYWORDS = [
-    "Pracovní smlouva",
-    "Dodatek č.",
-    "Mzdový výměr",
-    "Dohoda o provedení práce",
-    "Dohoda o pracovní činnosti"
-]
+def rozpoznej_typ_dokumentu(text):
+    text = text.lower()
+    if "pracovní smlouva" in text:
+        return "PS"
+    elif "mzdový výměr" in text or "mzdovy vymer" in text:
+        return "MV"
+    elif "dodatek k pracovní smlouvě" in text or "dodatek k pracovni smlouve" in text:
+        return "DPS"
+    else:
+        return "UNKNOWN"
 
-os.makedirs(output_folder, exist_ok=True)
+def najdi_jmeno(text):
+    match = re.search(r"Jméno a příjmení:\s*([A-ZÁ-Ž][a-zá-ž]+)\s+([A-ZÁ-Ž][a-zá-ž]+)", text)
+    if match:
+        prijmeni = match.group(1)
+        jmeno = match.group(2)
+        return prijmeni, jmeno
+    return "Neznámý", "Neznámý"
 
-# --- Načti PDF ---
-doc = fitz.open(input_pdf_path)
+def najdi_datum(text):
+    # Hledá datum s 1 nebo 2 ciframi dne a měsíce za "účinnosti dnem"
+    match = re.search(r"účinnosti dnem\s*(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+    if match:
+        den, mesic, rok = match.group(1).zfill(2), match.group(2).zfill(2), match.group(3)
+        datum_formatted = f"{rok}-{mesic}-{den}"
+        st.write(f"🗓️ [DEBUG] Datum podle 'účinnosti dnem': {datum_formatted}")
+        return datum_formatted
 
-segments = []
-current_segment = {"start": 0, "type": None, "name": None}
+    # Pokud nevyšlo, najde první datum obecně ve formátu D{1,2}.M{1,2}.YYYY
+    match = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+    if match:
+        den, mesic, rok = match.group(1).zfill(2), match.group(2).zfill(2), match.group(3)
+        datum_formatted = f"{rok}-{mesic}-{den}"
+        st.write(f"🗓️ [DEBUG] Datum podle obecného formátu: {datum_formatted}")
+        return datum_formatted
 
-for page_num in range(len(doc)):
-    page = doc.load_page(page_num)
-    text = page.get_text()
+    st.write("🗓️ [DEBUG] Datum nenalezeno")
+    return "0000-00-00"
 
-    for keyword in KEYWORDS:
-        if keyword in text:
-            if current_segment["type"]:  # už něco běží -> ukončíme předchozí blok
-                current_segment["end"] = page_num - 1
-                segments.append(current_segment)
-                current_segment = {"start": page_num, "type": None, "name": None}
+def je_nova_zakladni_stranka(text):
+    keywords = ["pracovní smlouva", "mzdový výměr", "dodatek k pracovní smlouvě"]
+    text_lower = text.lower()
+    return any(k in text_lower for k in keywords)
 
-            current_segment["start"] = page_num
-            current_segment["type"] = keyword
+st.title("📝 OCR segmentace naskenovaného PDF na jednotlivé dokumenty")
 
-            # Zkus najít jméno
-            name_match = re.search(r"(?:Jméno|Zaměstnanec|Pan|Paní)\s*([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)", text)
-            if name_match:
-                current_segment["name"] = name_match.group(1)
+uploaded_file = st.file_uploader("Nahraj jeden velký PDF soubor", type="pdf")
 
-# Přidej poslední segment až do konce dokumentu
-if current_segment["type"]:
-    current_segment["end"] = len(doc) - 1
-    segments.append(current_segment)
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
 
-# --- Ulož jednotlivé soubory ---
-for i, seg in enumerate(segments):
-    output_path = f"{output_folder}/{i+1:03d}_{seg['type'].replace(' ', '_')}"
-    if seg["name"]:
-        output_path += f"_{seg['name'].replace(' ', '_')}"
-    output_path += ".pdf"
+    reader = PdfReader(tmp_path)
+    num_pages = len(reader.pages)
+    st.write(f"📄 Celkem stran ve vstupu: {num_pages}")
 
-    new_doc = fitz.open()
-    for page_num in range(seg["start"], seg["end"] + 1):
-        new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
+    st.info("Probíhá OCR, může to chvíli trvat...")
+    images = convert_from_path(tmp_path, dpi=200)
 
-    new_doc.save(output_path)
-    new_doc.close()
-    print(f"Uloženo: {output_path}")
+    page_texts = []
+    for i, img in enumerate(images):
+        text = pytesseract.image_to_string(img, lang='ces')
+        page_texts.append(text)
+        st.write(f"📝 OCR načtena stránka {i+1}/{num_pages}")
+
+    segment_start_pages = []
+    for i, text in enumerate(page_texts):
+        if je_nova_zakladni_stranka(text):
+            segment_start_pages.append(i)
+    segment_start_pages.append(num_pages)
+
+    st.write(f"🔖 Nalezených segmentů: {len(segment_start_pages)-1}")
+
+    for idx in range(len(segment_start_pages) - 1):
+        start = segment_start_pages[idx]
+        end = segment_start_pages[idx + 1]
+
+        segment_text = "".join(page_texts[start:end])
+
+        typ = rozpoznej_typ_dokumentu(segment_text)
+        prijmeni, jmeno = najdi_jmeno(segment_text)
+        datum = najdi_datum(segment_text)
+
+        novy_nazev = f"{typ}_{prijmeni}_{jmeno}_INNO_{datum}.pdf"
+        st.markdown(f"### Segment {idx+1}: `{novy_nazev}` (strany {start+1}-{end})")
+
+        writer = PdfWriter()
+        for p in range(start, end):
+            writer.add_page(reader.pages[p])
+
+        segment_tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        with open(segment_tmp_file.name, "wb") as f_out:
+            writer.write(f_out)
+
+        st.write(f"📄 Počet stran segmentu: {end - start}")
+        for i_img in range(start, end):
+            st.image(images[i_img], caption=f"Strana {i_img - start + 1}", use_container_width=True)
+
+        with open(segment_tmp_file.name, "rb") as f:
+            st.download_button(
+                label="📥 Stáhnout tento segment",
+                data=f,
+                file_name=novy_nazev,
+                mime="application/pdf",
+                key=f"download_segment_{idx}"
+            )
