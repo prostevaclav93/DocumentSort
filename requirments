@@ -6,3 +6,5 @@ pdf2image
 pytesseract
 PdfReader
 PdfWriter
+poppler
+pillow
