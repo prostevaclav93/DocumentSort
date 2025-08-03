@@ -25,23 +25,16 @@ def najdi_jmeno(text):
     return "Neznámý", "Neznámý"
 
 def najdi_datum(text):
-    # Hledá datum s 1 nebo 2 ciframi dne a měsíce za "účinnosti dnem"
-    match = re.search(r"účinnosti dnem\s*(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+    # Upravený regulární výraz, který je robustnější vůči mezerám a koncům řádků.
+    # Používá \s+ místo \s a přidává volitelnou tečku na konci.
+    match = re.search(r"účinnosti\s+dnem\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})\.?", text, re.IGNORECASE)
     if match:
         den, mesic, rok = match.group(1).zfill(2), match.group(2).zfill(2), match.group(3)
         datum_formatted = f"{rok}-{mesic}-{den}"
         st.write(f"🗓️ [DEBUG] Datum podle 'účinnosti dnem': {datum_formatted}")
         return datum_formatted
 
-    # Pokud nevyšlo, najde první datum obecně ve formátu D{1,2}.M{1,2}.YYYY
-    match = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
-    if match:
-        den, mesic, rok = match.group(1).zfill(2), match.group(2).zfill(2), match.group(3)
-        datum_formatted = f"{rok}-{mesic}-{den}"
-        st.write(f"🗓️ [DEBUG] Datum podle obecného formátu: {datum_formatted}")
-        return datum_formatted
-
-    st.write("🗓️ [DEBUG] Datum nenalezeno")
+    st.write("🗓️ [DEBUG] Datum po 'účinnosti dnem' nebylo nalezeno")
     return "0000-00-00"
 
 def je_nova_zakladni_stranka(text):
@@ -62,14 +55,25 @@ if uploaded_file:
     num_pages = len(reader.pages)
     st.write(f"📄 Celkem stran ve vstupu: {num_pages}")
 
-    st.info("Probíhá OCR, může to chvíli trvat...")
+    # Vytvoření progress baru
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
     images = convert_from_path(tmp_path, dpi=200)
 
     page_texts = []
     for i, img in enumerate(images):
         text = pytesseract.image_to_string(img, lang='ces')
         page_texts.append(text)
-        st.write(f"📝 OCR načtena stránka {i+1}/{num_pages}")
+
+        # Aktualizace progress baru a textu
+        progress_value = (i + 1) / num_pages
+        progress_bar.progress(progress_value)
+        status_text.text(f"Probíhá OCR, načtena stránka {i+1}/{num_pages}")
+
+    # Po dokončení OCR se progress bar vymaže a nahradí se novým textem
+    progress_bar.empty()
+    status_text.text("OCR dokončeno! Probíhá segmentace...")
 
     segment_start_pages = []
     for i, text in enumerate(page_texts):

@@ -1,0 +1,10 @@
+streamlit
+PyMuPDF
+pdfplumber
+PyPDF2
+pdf2image
+pytesseract
+PdfReader
+PdfWriter
+poppler
+pillow
