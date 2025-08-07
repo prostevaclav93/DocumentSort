@@ -7,8 +7,7 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr-ces \
     poppler-utils \
     libgl1 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -18,5 +17,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 EXPOSE 8501
+ENV PORT=8501
 
-CMD ["streamlit", "run", "App.py"]
+CMD ["streamlit", "run", "App.py", "--server.port=8501", "--server.address=0.0.0.0"]
